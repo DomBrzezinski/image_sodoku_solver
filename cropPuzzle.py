@@ -174,6 +174,8 @@ def find_page(image, file_path):
     return warped
 
 def get_lines(image):
+    length = min(image.shape[0:1])
+    image = cv2.resize(image, (length, length))
     canny = cv2.GaussianBlur(image, (9, 9), 0)
     canny = cv2.adaptiveThreshold(canny, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
         cv2.THRESH_BINARY_INV, 5, 2)
@@ -181,7 +183,7 @@ def get_lines(image):
     cv2.resizeWindow("canny", 500, 500)
     wait_q()
 
-    lines = cv2.HoughLinesP(canny , 1, np.pi/180, threshold=300, minLineLength=300, maxLineGap=10)
+    lines = cv2.HoughLinesP(canny , 1, np.pi/180, threshold=250, minLineLength=300, maxLineGap=10)
     colour_image = cv2.cvtColor(canny, cv2.COLOR_BGR2RGB)
 
     for line in lines:
@@ -191,31 +193,39 @@ def get_lines(image):
     cv2.resizeWindow("colour_image", 500, 500)
     wait_q()
 
-    return lines
+    return lines, image
 
 
 
-def get_squares(image, lines):
-    length = min(image.shape[0:1])
-    image = cv2.resize(image, (length, length))
-    M = length // 9
+def get_squares(image, intersections):
+    length = image.shape[0]
+    correct_rows = [[],[],[],[],[],[],[],[],[],[]]
+    for intersection in intersections:
+        row = round((intersection[1]/length)*9)
+        correct_rows[row].append(intersection)
+    all_rows = np.array([])
+    all_rows = np.zeros((10,10,2))
+    for i in range(len(correct_rows)):
+        row = np.array(correct_rows[i])
+        row = row[row[:, 0].argsort()]
+        all_rows[i] = row
 
     tiles = []
 
-    for y in range(0, 9):
-        for x in range(0, 9):
+    for row_num in range(0,9):
+        for col_num in range(0, 9):
             # Define the coordinates for slicing: [y1:y2, x1:x2]
-            y1, y2 = y * M, (y + 1) * M
-            x1, x2 = x * M, (x + 1) * M
+            x1, y1 = all_rows[row_num, col_num]
+            x2, y2 = all_rows[row_num+1, col_num+1]
             
-            tile = image[y1:y2, x1:x2]
+            tile = image[int(y1):int(y2), int(x1):int(x2)]
             tiles.append(tile)
             
             # Optional: Save each tile
             cv2.imshow("tile", cv2.resize(tile, (500, 500)))
             cv2.resizeWindow("tile", 500, 500)
             wait_q()
-            cv2.imwrite(f'media/tiles/tile_{y}_{x}.jpg', tile)
+            cv2.imwrite(f'media/tiles/tile_{row_num}_{col_num}.jpg', tile)
 
 def remove_from_array(base_array, test_array):
     # print(base_array) 
@@ -251,9 +261,6 @@ def get_line_intersections(lines, image):
             lines[i][0] = np.array([new_x1, length, new_x2, 0])
             vertical.append(lines[i])
     
-    # print(horizontal)
-    # print(vertical)
-    print(len(horizontal), len(vertical))
 
     for line_1 in horizontal[:]:
         for line_2 in horizontal:
@@ -284,22 +291,44 @@ def get_line_intersections(lines, image):
                         try: vertical = remove_from_array(vertical, line_1)
                         except ValueError: pass
             
-    print(horizontal)
-    print(vertical)
+    print(len(horizontal), len(vertical))
     lines = horizontal + vertical
+
+    intersections = []
+    for h_line in horizontal:
+        for v_line in vertical:
+            x1, y1, x2, y2 = h_line[0]
+            x3, y3, x4, y4 = v_line[0]
+
+            denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+            if denom == 0:
+                continue
+
+            # Determinant formula for intersection
+            intersect_x = ((x1*y2 - y1*x2)*(x3 - x4) - (x1 - x2)*(x3*y4 - y3*x4)) / denom
+            intersect_y = ((x1*y2 - y1*x2)*(y3 - y4) - (y1 - y2)*(x3*y4 - y3*x4)) / denom
+
+            intersections.append((int(intersect_x), int(intersect_y)))
+
+
     
     for line in lines:
         x1, y1, x2, y2 = line[0]
         cv2.line(colour_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+    for intersection in intersections:
+        cv2.circle(colour_image, intersection, 5, (0, 0, 255), -1)
     cv2.imshow("colour_image", cv2.resize(colour_image, (500, 500)))
     cv2.resizeWindow("colour_image", 500, 500)
     wait_q()
+
+    return intersections
         
 
     
 
 in_omr = cv2.imread("media/sodokutest.jpeg", cv2.IMREAD_COLOR)
 page = find_page(in_omr, "media/sodokutest.jpeg" )
-lines = get_lines(page)
-get_line_intersections(lines, page)
-get_squares(page, lines)
+lines, page = get_lines(page)
+intersections = get_line_intersections(lines, page)
+get_squares(page, intersections)
