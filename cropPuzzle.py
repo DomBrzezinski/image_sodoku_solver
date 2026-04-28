@@ -2,47 +2,6 @@ import cv2
 import numpy as np
 import copy
 
-DEFAULT_WHITE_COLOR = 255
-DEFAULT_BLACK_COLOR = 0
-DEFAULT_NORMALIZE_PARAMS = {"alpha": 0, "beta": 255}
-DEFAULT_LINE_WIDTH = 2
-DEFAULT_MARKER_LINE_WIDTH = 4
-DEFAULT_CONTOUR_COLOR = (0, 255, 0)
-DEFAULT_CONTOUR_LINE_WIDTH = 2
-DEFAULT_CONTOUR_FILL_COLOR = (255, 255, 255)
-DEFAULT_CONTOUR_FILL_WIDTH = 10
-DEFAULT_BORDER_REMOVE = 5
-
-DEFAULT_GAUSSIAN_BLUR_PARAMS_MARKER = {"kernel_size": (5, 5), "sigma_x": 0}
-
-# CropPage constants
-MIN_PAGE_AREA_THRESHOLD = 80000
-MAX_COSINE_THRESHOLD = 0.35
-DEFAULT_GAUSSIAN_BLUR_KERNEL = (3, 3)
-PAGE_THRESHOLD_PARAMS = {"threshold_value": 200, "max_pixel_value": 255}
-CANNY_PARAMS = {
-    # lower_threshold: lower bound for Canny edge detection
-    # upper_threshold: upper bound for Canny edge detection
-    "lower_threshold": 185,
-    "upper_threshold": 55,
-}
-APPROX_POLY_EPSILON_FACTOR = 0.1
-
-# CropOnMarkers constants
-QUADRANT_DIVISION = {"height_factor": 3, "width_factor": 2}
-MARKER_RECTANGLE_COLOR = (150, 150, 150)
-ERODE_RECT_COLOR = (50, 50, 50)
-NORMAL_RECT_COLOR = (155, 155, 155)
-EROSION_PARAMS = {"kernel_size": (5, 5), "iterations": 5}
-
-# FeatureBasedAlignment constants
-DEFAULT_MAX_FEATURES = 500
-DEFAULT_GOOD_MATCH_PERCENT = 0.15
-
-# Builtin processor constants
-DEFAULT_MEDIAN_BLUR_KERNEL_SIZE = 5
-DEFAULT_GAUSSIAN_BLUR_PARAMS = {"kernel_size": (3, 3), "sigma_x": 0}
-
 
 options = {
         "morphKernel": [
@@ -92,7 +51,13 @@ def check_max_cosine(approx):
     return True
 
 
-def find_page(image, file_path):
+def find_page(image):
+
+    height, width = image.shape[0:2]
+    aspect_ratio = 1000/width
+    new_height = int(height*aspect_ratio)
+    image = cv2.resize(image, (1000, new_height))
+
 
     image = normalize(image)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -103,9 +68,6 @@ def find_page(image, file_path):
 
     contours, _ = cv2.findContours(thresh, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
-    cv2.imshow("thresh", cv2.resize(thresh, (500, 800)))
-    cv2.resizeWindow("thresh", 500, 800)
-    wait_q()
 
     comment_box = None
     boxes = []
@@ -122,12 +84,9 @@ def find_page(image, file_path):
                 boxes.append(approx)
 
     # 5. Draw the result
+    main_box = boxes[0]
     if boxes is not None:
-        cv2.drawContours(image, boxes, -1, (0, 255, 0), 3)
-
-    cv2.imshow("image", cv2.resize(image, (500, 800)))
-    cv2.resizeWindow("image", 500, 800)
-    wait_q()
+        cv2.drawContours(image, [main_box], -1, (0, 255, 0), 3)
 
     pts = np.reshape(boxes[0], (4, -1))
 
@@ -167,10 +126,6 @@ def find_page(image, file_path):
     transform_matrix = cv2.getPerspectiveTransform(rect, dst)
     warped = cv2.warpPerspective(image, transform_matrix, (max_width, max_height))
 
-    cv2.imshow("warped", cv2.resize(warped, (500, 500)))
-    cv2.resizeWindow("warped", 500, 500)
-    wait_q()
-
     return warped
 
 def get_lines(image):
@@ -179,25 +134,14 @@ def get_lines(image):
     canny = cv2.GaussianBlur(image, (9, 9), 0)
     canny = cv2.adaptiveThreshold(canny, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
         cv2.THRESH_BINARY_INV, 5, 2)
-    cv2.imshow("canny", cv2.resize(canny, (500, 500)))
-    cv2.resizeWindow("canny", 500, 500)
-    wait_q()
 
-    lines = cv2.HoughLinesP(canny , 1, np.pi/180, threshold=250, minLineLength=300, maxLineGap=10)
-    colour_image = cv2.cvtColor(canny, cv2.COLOR_BGR2RGB)
-
-    for line in lines:
-        x1, y1, x2, y2 = line[0]
-        cv2.line(colour_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
-    cv2.imshow("colour_image", cv2.resize(colour_image, (500, 500)))
-    cv2.resizeWindow("colour_image", 500, 500)
-    wait_q()
+    lines = cv2.HoughLinesP(canny , 1, np.pi/180, threshold=200, minLineLength=250, maxLineGap=10)
 
     return lines, image
 
 
 
-def get_squares(image, intersections):
+def get_squares(image, intersections, puzzlename):
     length = image.shape[0]
     correct_rows = [[],[],[],[],[],[],[],[],[],[]]
     for intersection in intersections:
@@ -220,23 +164,24 @@ def get_squares(image, intersections):
             
             tile = image[int(y1):int(y2), int(x1):int(x2)]
             tiles.append(tile)
+
+            tile = cv2.resize(tile, (40,40))
             
             # Optional: Save each tile
-            cv2.imshow("tile", cv2.resize(tile, (500, 500)))
-            cv2.resizeWindow("tile", 500, 500)
-            wait_q()
-            cv2.imwrite(f'media/tiles/tile_{row_num}_{col_num}.jpg', tile)
+            cv2.imwrite(f'media/tiles/{puzzlename}_tile_{row_num}_{col_num}.jpg', tile)
 
 def remove_from_array(base_array, test_array):
-    # print(base_array) 
-    # print(test_array)
-    # print(base_array[2])
-    # print(np.array_equal(base_array[2], test_array))
     for index in range(len(base_array)):
         if np.array_equal(base_array[index], test_array):
             base_array.pop(index)
             return base_array
     raise ValueError('remove_from_array(array, x): x not in array')
+
+def is_in_array(base_array, test_array):
+    for index in range(len(base_array)):
+        if np.array_equal(base_array[index], test_array):
+            return True
+    return False
 
 
 
@@ -246,6 +191,12 @@ def get_line_intersections(lines, image):
     lines_copy = copy.deepcopy(lines)
     horizontal = []
     vertical = []
+
+    for line in lines:
+        x1, y1, x2, y2 = line[0]
+        cv2.line(colour_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+
     for i in range(len(lines)):
         x1, y1, x2, y2 = lines_copy[i][0]
         if abs(x1 - x2) > abs(y1 - y2):
@@ -260,36 +211,46 @@ def get_line_intersections(lines, image):
             new_x2 = int(x2 + (x2-x1) * (length-y1)/(y1-y2))
             lines[i][0] = np.array([new_x1, length, new_x2, 0])
             vertical.append(lines[i])
+
+    for line in horizontal[:]:
+        x1, y1, x2, y2 = line[0]
+        if abs(y1-y2)/abs(x1-x2) >= 0.5:
+            horizontal = remove_from_array(horizontal, line)
+    for line in vertical[:]:
+        x1, y1, x2, y2 = line[0]
+        if abs(x1-x2)/abs(y1-y2) >= 0.5:
+            vertical = remove_from_array(vertical, line)
     
-
-    for line_1 in horizontal[:]:
-        for line_2 in horizontal:
+    new_horizontal = []
+    for line_1 in horizontal:
+        added = False
+        for line_2 in new_horizontal[:]:
             x1_1, y1_1, x1_2, y1_2 = line_1[0]
             x2_1, y2_1, x2_2, y2_2 = line_2[0]
-            if [x1_1, y1_1, x1_2, y1_2] != [x2_1, y2_1, x2_2, y2_2]:
-                if abs(y1_1 - y2_1) < length/20 and abs(y2_1 - y2_2) < length/20:
-                    if abs(y1_1 - y1_2) <  abs(y2_1 - y2_2): 
-                        try: horizontal = remove_from_array(horizontal, line_2)
-                        except ValueError: 
-                            print("cant remove")
-                            pass
-                    else:
-                        try: horizontal = remove_from_array(horizontal, line_1)
-                        except ValueError: pass
+            if [x1_1, y1_1, x1_2, y1_2] == [x2_1, y2_1, x2_2, y2_2]:
+                added = True
+            else:
+                if abs(y1_1 - y2_1) < length/15 and abs(y2_1 - y2_2) < length/15:
+                    added = True
+        if not added:
+            new_horizontal.append(line_1)
+    horizontal = new_horizontal
+
         
-
-    for line_1 in vertical[:]:
-        for line_2 in vertical:
+    new_vertical = []
+    for line_1 in vertical:
+        added = False
+        for line_2 in new_vertical[:]:
             x1_1, y1_1, x1_2, y1_2 = line_1[0]
             x2_1, y2_1, x2_2, y2_2 = line_2[0]
-            if [x1_1, y1_1, x1_2, y1_2] != [x2_1, y2_1, x2_2, y2_2]:
-                if abs(x1_1 - x2_1) < length/20 and abs(x2_1 - x2_2) < length/20:
-                    if abs(x1_1 - x1_2) <  abs(x2_1 - x2_2):
-                        try: vertical = remove_from_array(vertical, line_2)
-                        except ValueError: pass
-                    else:
-                        try: vertical = remove_from_array(vertical, line_1)
-                        except ValueError: pass
+            if [x1_1, y1_1, x1_2, y1_2] == [x2_1, y2_1, x2_2, y2_2]:
+                added = True
+            else:
+                if abs(x1_1 - x2_1) < length/15 and abs(x2_1 - x2_2) < length/15:
+                    added = True
+        if not added:
+            new_vertical.append(line_1)
+    vertical = new_vertical
             
     print(len(horizontal), len(vertical))
     lines = horizontal + vertical
@@ -318,17 +279,14 @@ def get_line_intersections(lines, image):
 
     for intersection in intersections:
         cv2.circle(colour_image, intersection, 5, (0, 0, 255), -1)
-    cv2.imshow("colour_image", cv2.resize(colour_image, (500, 500)))
+
+    cv2.imshow("colour_image", cv2.resize(colour_image, (500,500)))
     cv2.resizeWindow("colour_image", 500, 500)
     wait_q()
+
 
     return intersections
         
 
     
 
-in_omr = cv2.imread("media/sodokutest.jpeg", cv2.IMREAD_COLOR)
-page = find_page(in_omr, "media/sodokutest.jpeg" )
-lines, page = get_lines(page)
-intersections = get_line_intersections(lines, page)
-get_squares(page, intersections)
